@@ -1,0 +1,54 @@
+{
+  "name": "albadownload",
+  "version": "1.1.0",
+  "description": "AlbaDownload - Shkarkues videosh për Windows",
+  "main": "main.js",
+  "scripts": {
+    "build:renderer": "npx esbuild renderer/index.jsx --bundle --outfile=renderer/dist/bundle.js --platform=browser --format=esm --loader:.js=jsx --loader:.jsx=jsx",
+    "start": "npm run build:renderer && electron .",
+    "dev": "npm run build:renderer && electron .",
+    "pack": "npm run build:renderer && electron-builder --dir",
+    "dist": "npm run build:renderer && electron-builder --win --x64"
+  },
+  "keywords": [
+    "electron",
+    "video",
+    "downloader"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "youtube-dl-exec": "^3.0.3"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^25.0.0",
+    "esbuild": "^0.21.5"
+  },
+  "build": {
+    "appId": "com.albadownload.app",
+    "productName": "AlbaDownload",
+    "icon": "build/icon.ico",
+    "files": [
+      "**/*"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "albadownload-${version}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

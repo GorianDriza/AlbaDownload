@@ -37,10 +37,7 @@
       {
         "provider": "github",
         "owner": "GorianDriza",
-        "repo": "AlbaDownload",
-        "releaseType": "release",
-        "releaseName": "AlbaDownload v${version}",
-        "releaseNotes": "Automatikisht krijuar për AlbaDownload v${version}."
+        "repo": "AlbaDownload"
       }
     ],
     "files": [

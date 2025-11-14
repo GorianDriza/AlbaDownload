@@ -88,6 +88,20 @@ ipcMain.handle('open-download-location', async (_event, { filePath, mode }) => {
   }
 });
 
+ipcMain.handle('open-external', async (_event, url) => {
+  if (!url || typeof url !== 'string') {
+    throw new Error('Nuk u gjet URL për ta hapur.');
+  }
+
+  try {
+    await shell.openExternal(url);
+    return { ok: true };
+  } catch (error) {
+    console.error('[open-external] dështoi', error);
+    throw new Error('Nuk mund të hap këtë lidhje.');
+  }
+});
+
 ipcMain.handle('check-for-updates', async () => {
   const currentVersion = app.getVersion();
   const repoSlug = 'GorianDriza/AlbaDownload';

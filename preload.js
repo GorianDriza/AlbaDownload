@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startDownload: payload => ipcRenderer.invoke('start-download', payload),
   openDownloadLocation: payload => ipcRenderer.invoke('open-download-location', payload),
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  openExternal: url => ipcRenderer.invoke('open-external', url),
   onDownloadProgress: callback => {
     const listener = (_event, data) => callback(data);
     ipcRenderer.on('download-progress', listener);

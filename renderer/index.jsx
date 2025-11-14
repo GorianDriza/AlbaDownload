@@ -55,6 +55,8 @@ function App() {
   const [downloads, setDownloads] = useState({});
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [playlistDownload, setPlaylistDownload] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState(null);
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -272,11 +274,14 @@ function App() {
         return;
       }
       if (result.hasUpdate) {
+        setUpdateInfo(result);
+        setIsUpdateModalOpen(true);
         setStatus({
           message: `Version i ri ${result.latestVersion} është në dispozicion. Hap GitHub për ta shkarkuar.`,
           variant: 'success'
         });
       } else {
+        setUpdateInfo(null);
         setStatus({
           message: `Je në versionin më të fundit (${result.currentVersion}).`,
           variant: 'info'
@@ -498,6 +503,40 @@ function App() {
           </div>
         </div>
       )}
+
+      {isUpdateModalOpen && updateInfo && (
+        <div className="modal" onClick={() => setIsUpdateModalOpen(false)}>
+          <div className="modal-card" onClick={event => event.stopPropagation()}>
+            <header className="modal-head">
+              <h2>Përditësim i ri</h2>
+              <button className="ghost" type="button" onClick={() => setIsUpdateModalOpen(false)}>
+                Mbyll
+              </button>
+            </header>
+            <p>
+              Version i ri <strong>{updateInfo.latestVersion}</strong> është në dispozicion (ti ke{' '}
+              <strong>{updateInfo.currentVersion}</strong>).
+            </p>
+            <p className="muted small">Hap faqen e GitHub për ta shkarkuar instaluesin e ri.</p>
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (updateInfo.url) {
+                    electronAPI.openExternal(updateInfo.url);
+                  }
+                  setIsUpdateModalOpen(false);
+                }}
+              >
+                Hap GitHub
+              </button>
+              <button className="ghost" type="button" onClick={() => setIsUpdateModalOpen(false)}>
+                Mbyll
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -505,4 +544,3 @@ function App() {
 const container = document.getElementById('root');
 const root = createRoot(container);
 root.render(<App />);
-

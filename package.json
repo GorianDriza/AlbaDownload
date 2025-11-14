@@ -33,13 +33,6 @@
     "appId": "com.albadownload.app",
     "productName": "AlbaDownload",
     "icon": "build/icon.ico",
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "GorianDriza",
-        "repo": "AlbaDownload"
-      }
-    ],
     "files": [
       "**/*"
     ],

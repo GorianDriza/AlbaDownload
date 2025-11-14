@@ -10,8 +10,6 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Checkout repo
@@ -25,5 +23,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build & publish with electron-builder
+      - name: Build Windows installer
         run: npm run dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/albadownload-*-setup.exe
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

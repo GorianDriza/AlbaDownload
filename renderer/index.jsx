@@ -317,7 +317,7 @@ function App() {
           </button>
         </header>
 
-        <div>
+        <div className='input-group'>
           <label htmlFor="video-url">URL e videos</label>
           <input
             id="video-url"

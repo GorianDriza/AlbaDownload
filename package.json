@@ -1,6 +1,6 @@
 {
   "name": "albadownload",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "AlbaDownload - Shkarkues videosh për Windows",
   "main": "main.js",
   "scripts": {

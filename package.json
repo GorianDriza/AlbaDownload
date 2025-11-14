@@ -8,7 +8,7 @@
     "start": "npm run build:renderer && electron .",
     "dev": "npm run build:renderer && electron .",
     "pack": "npm run build:renderer && electron-builder --dir",
-    "dist": "npm run build:renderer && electron-builder --win --x64",
+    "dist": "npm run build:renderer && electron-builder --win --x64 --publish=never",
     "release": "node scripts/release.js"
   },
   "keywords": [

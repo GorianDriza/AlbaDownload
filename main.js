@@ -135,6 +135,14 @@ ipcMain.handle('check-for-updates', async () => {
               const latestTag = (json.tag_name || json.name || '').replace(/^v/i, '').trim();
               const latestUrl = json.html_url || `https://github.com/${repoSlug}/releases`;
 
+              const assets = Array.isArray(json.assets) ? json.assets : [];
+              const windowsAsset =
+                assets.find(asset => typeof asset?.name === 'string' && /albadownload-.*-setup\.exe$/i.test(asset.name)) ||
+                assets.find(asset => typeof asset?.name === 'string' && asset.name.toLowerCase().endsWith('.exe'));
+
+              const assetUrl = windowsAsset?.browser_download_url || null;
+              const assetName = windowsAsset?.name || null;
+
               if (!latestTag) {
                 resolve({
                   ok: false,
@@ -150,7 +158,9 @@ ipcMain.handle('check-for-updates', async () => {
                 hasUpdate,
                 currentVersion,
                 latestVersion: latestTag,
-                url: latestUrl
+                url: latestUrl,
+                assetUrl,
+                assetName
               });
             } catch (error) {
               console.error('[updates] parsing failed', error);
@@ -190,6 +200,136 @@ ipcMain.handle('check-for-updates', async () => {
         currentVersion
       });
     }
+  });
+});
+
+ipcMain.handle('download-update', async (_event, payload) => {
+  const sourceUrl = payload?.assetUrl || payload?.url;
+
+  if (!sourceUrl || typeof sourceUrl !== 'string') {
+    throw new Error('Nuk u gjet lidhja e instaluesit për ta shkarkuar.');
+  }
+
+  const downloadsDir = app.getPath('downloads');
+  await fs.promises.mkdir(downloadsDir, { recursive: true });
+
+  let baseFileName = payload?.assetName;
+  try {
+    if (!baseFileName) {
+      const parsed = new URL(sourceUrl);
+      baseFileName = path.basename(parsed.pathname) || 'AlbaDownload-Setup.exe';
+    }
+  } catch {
+    baseFileName = baseFileName || 'AlbaDownload-Setup.exe';
+  }
+
+  const safeFileName = findUniqueFileName(downloadsDir, baseFileName);
+  const finalPath = path.join(downloadsDir, safeFileName);
+  const tempPath = `${finalPath}.download`;
+
+  return new Promise(resolve => {
+    let settled = false;
+    const cleanupAndResolve = result => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+
+    const fileStream = fs.createWriteStream(tempPath);
+
+    const handleResponse = response => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        const redirectUrl = new URL(response.headers.location, sourceUrl);
+        https
+          .get(
+            redirectUrl,
+            {
+              headers: {
+                'User-Agent': 'AlbaDownload-Updater'
+              }
+            },
+            handleResponse
+          )
+          .on('error', error => {
+            console.error('[download-update] redirect request error', error);
+            cleanupAndResolve({
+              ok: false,
+              reason: 'Shkarkimi i përditësimit dështoi.'
+            });
+          });
+        return;
+      }
+
+      if (response.statusCode !== 200) {
+        console.error('[download-update] GitHub responded with status', response.statusCode);
+        response.resume();
+        cleanupAndResolve({
+          ok: false,
+          reason: `GitHub ktheu statusin ${response.statusCode} gjatë shkarkimit.`
+        });
+        return;
+      }
+
+      response.pipe(fileStream);
+    };
+
+    const request = https.get(
+      sourceUrl,
+      {
+        headers: {
+          'User-Agent': 'AlbaDownload-Updater'
+        }
+      },
+      handleResponse
+    );
+
+    request.on('error', error => {
+      console.error('[download-update] request error', error);
+      fs.promises.unlink(tempPath).catch(() => {});
+      cleanupAndResolve({
+        ok: false,
+        reason: 'Shkarkimi i përditësimit dështoi.'
+      });
+    });
+
+    request.setTimeout(15000, () => {
+      console.warn('[download-update] request timed out');
+      request.destroy();
+      fs.promises.unlink(tempPath).catch(() => {});
+      cleanupAndResolve({
+        ok: false,
+        reason: 'Kërkesa për shkarkimin e përditësimit skadoi.'
+      });
+    });
+
+    fileStream.on('finish', async () => {
+      try {
+        await fs.promises.rename(tempPath, finalPath);
+        cleanupAndResolve({
+          ok: true,
+          filePath: finalPath,
+          fileName: safeFileName
+        });
+      } catch (error) {
+        console.error('[download-update] failed to finalize file', error);
+        fs.promises.unlink(tempPath).catch(() => {});
+        fs.promises.unlink(finalPath).catch(() => {});
+        cleanupAndResolve({
+          ok: false,
+          reason: 'Nuk mund të përfundoj shkarkimin e përditësimit.'
+        });
+      }
+    });
+
+    fileStream.on('error', error => {
+      console.error('[download-update] file stream error', error);
+      request.destroy();
+      fs.promises.unlink(tempPath).catch(() => {});
+      cleanupAndResolve({
+        ok: false,
+        reason: 'Shkarkimi i përditësimit dështoi.'
+      });
+    });
   });
 });
 

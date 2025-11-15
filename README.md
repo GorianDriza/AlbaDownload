@@ -46,3 +46,35 @@ The generated `video-downloader-<version>-setup.exe` file in `dist/` can be doub
 - The renderer is written in modern React (`renderer/index.jsx`) and is compiled via esbuild into `renderer/dist/bundle.js`, providing the UI, progress updates, Settings modal, live preview card, and download history list with per-item progress bars.
 
 Feel free to customize the styling, add tray/menu integration, or wire in a more specialized downloader library for sites that require auth or custom protocols.
+
+## Releasing a new version
+
+This project includes a small helper script to bump the version, commit, and tag a release.
+
+1. Make sure your working tree is clean and your changes are already committed.
+2. Decide the next semantic version (for example, `1.2.7` in `MAJOR.MINOR.PATCH` format).
+3. Run:
+
+   ```bash
+   npm run release -- 1.2.7
+   ```
+
+What this does under the hood:
+
+- Updates the `version` field in `package.json` (and `package-lock.json` if present).
+- Runs `git add` for those files and creates a commit: `chore: release v1.2.7`.
+- Pushes the commit to your default remote.
+- Creates a Git tag `v1.2.7` and pushes the tag.
+
+In the GitHub repo, pushing the tag is intended to trigger CI (GitHub Actions) which builds the Windows installer and publishes a GitHub Release for that version.
+
+### Suggested release checklist
+
+Before running `npm run release`, it helps to follow a quick checklist:
+
+- Pull the latest changes from `main` / `master`.
+- Run `npm install` if dependencies changed.
+- Run and verify the app locally with `npm start`.
+- Optionally build the installer locally with `npm run dist` to ensure it still compiles.
+- Update any user-facing docs or changelog if you keep one.
+- Only then run `npm run release -- <next-version>` to bump, commit, and tag the new version.

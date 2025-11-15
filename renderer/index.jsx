@@ -10,7 +10,9 @@ const electronAPI = window.electronAPI || {
   onDownloadProgress: () => () => {},
   onSettingsUpdated: () => () => {},
   openDownloadLocation: () => Promise.resolve(),
-  checkForUpdates: async () => ({ ok: false })
+  checkForUpdates: async () => ({ ok: false }),
+  downloadUpdate: async () => ({ ok: false }),
+  openExternal: () => Promise.resolve()
 };
 
 const clampProgress = value => {
@@ -57,6 +59,7 @@ function App() {
   const [playlistDownload, setPlaylistDownload] = useState(false);
   const [updateInfo, setUpdateInfo] = useState(null);
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -276,8 +279,11 @@ function App() {
       if (result.hasUpdate) {
         setUpdateInfo(result);
         setIsUpdateModalOpen(true);
+        const canAutoDownload = Boolean(result.assetUrl);
         setStatus({
-          message: `Version i ri ${result.latestVersion} është në dispozicion. Hap GitHub për ta shkarkuar.`,
+          message: canAutoDownload
+            ? `Version i ri ${result.latestVersion} është në dispozicion. Mund ta shkarkosh direkt nga aplikacioni.`
+            : `Version i ri ${result.latestVersion} është në dispozicion. Hap GitHub për ta shkarkuar.`,
           variant: 'success'
         });
       } else {
@@ -293,6 +299,78 @@ function App() {
         message: 'Kontrolli për përditësime dështoi.',
         variant: 'error'
       });
+    }
+  };
+
+  const handleDownloadUpdate = async () => {
+    if (!updateInfo?.assetUrl) {
+      setStatus({
+        message: 'Ky përditësim nuk ka instalues të disponueshëm për shkarkim automatik.',
+        variant: 'error'
+      });
+      return;
+    }
+
+    try {
+      setIsDownloadingUpdate(true);
+      setStatus({
+        message: 'Po shkarkohet përditësimi i aplikacionit...',
+        variant: 'info'
+      });
+
+      const result = await electronAPI.downloadUpdate({
+        assetUrl: updateInfo.assetUrl,
+        assetName: updateInfo.assetName
+      });
+
+      if (result?.ok && result.filePath) {
+        setStatus({
+          message: `Përditësimi u shkarkua në ${result.filePath}.`,
+          variant: 'success'
+        });
+
+        let shouldRunInstaller = false;
+        try {
+          // eslint-disable-next-line no-alert
+          shouldRunInstaller = window.confirm(
+            'Përditësimi u shkarkua. Dëshiron ta nisësh instaluesin tani?'
+          );
+        } catch {
+          shouldRunInstaller = false;
+        }
+
+        if (shouldRunInstaller) {
+          try {
+            await electronAPI.openDownloadLocation({ filePath: result.filePath, mode: 'file' });
+          } catch (error) {
+            console.error('[renderer] openDownloadLocation (file) for update failed', error);
+            setStatus({
+              message:
+                'Instaluesi u shkarkua, por nuk mund të nis automatikisht. Hap dosjen e shkarkimeve dhe niseni manualisht.',
+              variant: 'error'
+            });
+          }
+        } else {
+          try {
+            await electronAPI.openDownloadLocation({ filePath: result.filePath, mode: 'folder' });
+          } catch (error) {
+            console.error('[renderer] openDownloadLocation (folder) for update failed', error);
+          }
+        }
+      } else {
+        setStatus({
+          message: result?.reason || 'Shkarkimi i përditësimit dështoi.',
+          variant: 'error'
+        });
+      }
+    } catch (error) {
+      console.error('[renderer] downloadUpdate failed', error);
+      setStatus({
+        message: 'Shkarkimi i përditësimit dështoi.',
+        variant: 'error'
+      });
+    } finally {
+      setIsDownloadingUpdate(false);
     }
   };
 
@@ -517,8 +595,21 @@ function App() {
               Version i ri <strong>{updateInfo.latestVersion}</strong> është në dispozicion (ti ke{' '}
               <strong>{updateInfo.currentVersion}</strong>).
             </p>
-            <p className="muted small">Hap faqen e GitHub për ta shkarkuar instaluesin e ri.</p>
+            <p className="muted small">
+              {updateInfo.assetUrl
+                ? 'Mund ta shkarkosh instaluesin e ri direkt nga aplikacioni ose ta hapësh faqen e GitHub.'
+                : 'Hap faqen e GitHub për ta shkarkuar instaluesin e ri.'}
+            </p>
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              {updateInfo.assetUrl && (
+                <button
+                  type="button"
+                  onClick={handleDownloadUpdate}
+                  disabled={isDownloadingUpdate}
+                >
+                  {isDownloadingUpdate ? 'Duke shkarkuar...' : 'Shkarko përditësimin'}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {

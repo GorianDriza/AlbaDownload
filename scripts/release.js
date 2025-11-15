@@ -1,4 +1,20 @@
 #!/usr/bin/env node
+/**
+ * Small helper script to cut a new app release.
+ *
+ * Usage:
+ *   npm run release -- 1.2.7
+ *
+ * What it does:
+ *   - Validates the version string (MAJOR.MINOR.PATCH).
+ *   - Updates "version" in package.json and package-lock.json.
+ *   - Creates a Git commit and pushes it.
+ *   - Creates a Git tag (v<version>) and pushes the tag.
+ *
+ * In the GitHub repo, pushing the tag is expected to trigger CI
+ * (GitHub Actions) which builds the Windows installer and attaches
+ * it to a GitHub Release for that tag.
+ */
 
 const fs = require('fs');
 const path = require('path');
@@ -57,4 +73,3 @@ function main() {
 }
 
 main();
-

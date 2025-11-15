@@ -330,6 +330,20 @@
         background: rgba(15, 23, 42, 0.4);
       }
 
+      .download-item-thumb {
+        width: 100%;
+        max-height: 160px;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .download-item-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+
       .download-item-head {
         display: flex;
         flex-direction: column;
@@ -349,11 +363,65 @@
         height: 6px;
       }
 
+      .download-item-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 8px;
+      }
+
       .app-footer {
         margin-top: 12px;
         font-size: 0.8rem;
         opacity: 0.7;
         text-align: center;
+      }
+
+      .clipboard-hint {
+        margin-top: 6px;
+        padding: 6px 8px;
+        border-radius: 8px;
+        border: 1px dashed #334155;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 0.85rem;
+      }
+
+      .clipboard-hint code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 0.8rem;
+        background: rgba(15, 23, 42, 0.6);
+        padding: 2px 4px;
+        border-radius: 4px;
+      }
+
+      body[data-theme='light'] {
+        background: radial-gradient(circle at top, #e0f2fe 0, #e5e7eb 55%, #ffffff 100%);
+        color: #0f172a;
+      }
+
+      body[data-theme='light'] input {
+        background: #f9fafb;
+        border-color: #cbd5f5;
+        color: inherit;
+      }
+
+      body[data-theme='light'] .modal-card,
+      body[data-theme='light'] .download-item,
+      body[data-theme='light'] .downloads-section,
+      body[data-theme='light'] .preview-panel {
+        background: rgba(255, 255, 255, 0.9);
+        border-color: #d1d5db;
+      }
+
+      body[data-theme='light'] .brand-mark {
+        box-shadow: 0 10px 30px rgba(148, 163, 184, 0.7);
+      }
+
+      body[data-theme='light'] button.ghost {
+        border-color: #d1d5db;
       }
     </style>
   </head>

@@ -7,7 +7,9 @@ class SettingsStore {
     this.defaults = {
       downloadFolder: null,
       downloadHistory: [],
-      subtitleLanguages: ['sq', 'en']
+      subtitleLanguages: ['sq', 'en'],
+      language: 'sq',
+      theme: 'system'
     };
     this.data = { ...this.defaults };
     this.isInitialized = false;

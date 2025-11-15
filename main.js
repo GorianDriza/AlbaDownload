@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
@@ -14,6 +14,31 @@ let mainWindow;
 const completedDownloads = new Set();
 const downloadQueue = [];
 let activeDownload = null;
+const downloadControllers = new Map();
+
+function createDownloadController(downloadId) {
+  if (!downloadId) return null;
+  const controller = { id: downloadId, cancelled: false };
+  downloadControllers.set(downloadId, controller);
+  return controller;
+}
+
+function getDownloadController(downloadId) {
+  if (!downloadId) return null;
+  return downloadControllers.get(downloadId) || null;
+}
+
+function clearDownloadController(downloadId) {
+  if (!downloadId) return;
+  downloadControllers.delete(downloadId);
+}
+
+function createCancelledError(message) {
+  const error = new Error(message || 'Download cancelled.');
+  error.code = 'DOWNLOAD_CANCELLED';
+  error.isCancelled = true;
+  return error;
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -52,6 +77,25 @@ app.on('window-all-closed', () => {
 });
 
 ipcMain.handle('get-settings', async () => settingsStore.getAll());
+
+ipcMain.handle('update-settings', async (_event, partial) => {
+  const safePartial = partial && typeof partial === 'object' ? partial : {};
+  const allowedKeys = ['language', 'theme', 'subtitleLanguages'];
+  const filtered = {};
+  allowedKeys.forEach(key => {
+    if (Object.prototype.hasOwnProperty.call(safePartial, key)) {
+      filtered[key] = safePartial[key];
+    }
+  });
+
+  if (Object.keys(filtered).length === 0) {
+    return settingsStore.getAll();
+  }
+
+  const updated = settingsStore.update(filtered);
+  broadcastSettings(updated);
+  return updated;
+});
 
 ipcMain.handle('choose-download-folder', async () => {
   const defaultPath = settingsStore.get('downloadFolder') || app.getPath('downloads');
@@ -99,6 +143,27 @@ ipcMain.handle('open-external', async (_event, url) => {
   } catch (error) {
     console.error('[open-external] dështoi', error);
     throw new Error('Nuk mund të hap këtë lidhje.');
+  }
+});
+
+ipcMain.handle('read-clipboard-text', async () => {
+  try {
+    return clipboard.readText() || '';
+  } catch (error) {
+    console.error('[clipboard] read failed', error);
+    return '';
+  }
+});
+
+ipcMain.handle('write-clipboard-text', async (_event, text) => {
+  try {
+    if (typeof text === 'string' && text.length) {
+      clipboard.writeText(text);
+    }
+    return { ok: true };
+  } catch (error) {
+    console.error('[clipboard] write failed', error);
+    return { ok: false };
   }
 });
 
@@ -333,7 +398,7 @@ ipcMain.handle('download-update', async (_event, payload) => {
   });
 });
 
-ipcMain.handle('start-download', async (_event, { url, directory, format = 'mp4', playlist = false }) => {
+ipcMain.handle('start-download', async (_event, { url, directory, format = 'mp4', playlist = false, quality = 'auto' }) => {
   if (!url || typeof url !== 'string') {
     throw new Error('Kërkohet një URL videoje e vlefshme');
   }
@@ -357,18 +422,19 @@ ipcMain.handle('start-download', async (_event, { url, directory, format = 'mp4'
     url: url.trim(),
     directory: normalizedDirectory,
     format: normalizedFormat,
-    playlist: Boolean(playlist)
+    playlist: Boolean(playlist),
+    quality: typeof quality === 'string' && quality ? quality : 'auto'
   });
 
   return { id: downloadId, status: 'queued', format: normalizedFormat };
 });
 
-async function downloadMedia(videoUrl, directory, format, downloadId, playlist) {
+async function downloadMedia(videoUrl, directory, format, downloadId, playlist, quality, controller) {
   if (isYouTubeUrl(videoUrl)) {
-    return downloadYouTubeMedia(videoUrl, directory, format, downloadId, playlist);
+    return downloadYouTubeMedia(videoUrl, directory, format, downloadId, playlist, quality, controller);
   }
   console.log(`[download:${downloadId}] Using direct HTTP download pipeline.`);
-  return downloadDirectMedia(videoUrl, directory, format, downloadId);
+  return downloadDirectMedia(videoUrl, directory, format, downloadId, controller);
 }
 
 function enqueueDownload(job) {
@@ -396,25 +462,28 @@ async function processNextDownload() {
 
   const job = downloadQueue.shift();
   activeDownload = job;
+  const controller = createDownloadController(job.id);
 
   try {
-    await downloadMedia(job.url, job.directory, job.format, job.id, job.playlist);
+    await downloadMedia(job.url, job.directory, job.format, job.id, job.playlist, job.quality, controller);
   } catch (error) {
     console.error(`[download] Failed ${job.id}:`, error);
+    const isCancelled = Boolean(error && error.isCancelled);
     sendProgress({
       id: job.id,
-      status: 'error',
-      message: error.message || 'Download failed.',
+      status: isCancelled ? 'cancelled' : 'error',
+      message: isCancelled ? 'Shkarkimi u ndërpre nga përdoruesi.' : error.message || 'Download failed.',
       fileName: null,
       format: job.format
     });
   } finally {
+    clearDownloadController(job.id);
     activeDownload = null;
     processNextDownload();
   }
 }
 
-function downloadDirectMedia(videoUrl, directory, format, downloadId) {
+function downloadDirectMedia(videoUrl, directory, format, downloadId, controller) {
   return new Promise((resolve, reject) => {
     let parsedUrl;
     try {
@@ -431,6 +500,11 @@ function downloadDirectMedia(videoUrl, directory, format, downloadId) {
     const finalFilePath = path.join(directory, fileName);
     const tempFilePath = `${finalFilePath}.download`;
     const fileStream = fs.createWriteStream(tempFilePath);
+
+    if (controller) {
+      controller.tempFilePath = tempFilePath;
+      controller.fileStream = fileStream;
+    }
 
     sendProgress({
       id: downloadId,
@@ -482,10 +556,21 @@ function downloadDirectMedia(videoUrl, directory, format, downloadId) {
 
     const request = protocol.get(videoUrl, handleResponse);
 
+    if (controller) {
+      controller.request = request;
+      if (controller.cancelled) {
+        request.destroy();
+      }
+    }
+
     request.on('error', error => {
       console.error(`[download:${downloadId}] HTTP request error`, error);
       fs.promises.unlink(tempFilePath).catch(() => {});
-      reject(error);
+      if (controller && controller.cancelled) {
+        reject(createCancelledError('Shkarkimi u ndërpre nga përdoruesi.'));
+      } else {
+        reject(error);
+      }
     });
 
     fileStream.on('finish', async () => {
@@ -501,7 +586,11 @@ function downloadDirectMedia(videoUrl, directory, format, downloadId) {
         );
         resolve({ filePath: finalPath });
       } catch (error) {
-        reject(error);
+        if (controller && controller.cancelled) {
+          reject(createCancelledError('Shkarkimi u ndërpre nga përdoruesi.'));
+        } else {
+          reject(error);
+        }
       }
     });
 
@@ -509,7 +598,11 @@ function downloadDirectMedia(videoUrl, directory, format, downloadId) {
       console.error(`[download:${downloadId}] File stream error`, error);
       request.destroy();
       fs.promises.unlink(tempFilePath).catch(() => {});
-      reject(error);
+      if (controller && controller.cancelled) {
+        reject(createCancelledError('Shkarkimi u ndërpre nga përdoruesi.'));
+      } else {
+        reject(error);
+      }
     });
   });
 }
@@ -712,7 +805,7 @@ async function finalizeDownload(tempPath, finalFilePath, format, fileName, downl
 
 const METADATA_EAGER_TIMEOUT = 1500;
 
-async function downloadYouTubeMedia(videoUrl, directory, format, downloadId, playlist) {
+async function downloadYouTubeMedia(videoUrl, directory, format, downloadId, playlist, quality, controller) {
   console.log(`[download:${downloadId}] Detected YouTube URL, requesting metadata...`);
 
   const metadataPromise = fetchYouTubeMetadata(videoUrl, downloadId).catch(error => {
@@ -737,7 +830,10 @@ async function downloadYouTubeMedia(videoUrl, directory, format, downloadId, pla
   const uniqueBase = findUniqueBaseName(directory, baseName, extension);
   const outputTemplate = path.join(directory, `${uniqueBase}.%(ext)s`);
   const finalFilePath = path.join(directory, `${uniqueBase}.${extension}`);
-  const ytOptions = buildYtDlpOptions(format, outputTemplate, { playlist: Boolean(playlist) });
+  const ytOptions = buildYtDlpOptions(format, outputTemplate, {
+    playlist: Boolean(playlist),
+    quality: typeof quality === 'string' && quality ? quality : 'auto'
+  });
   let preview = buildYouTubePreview(quickMetadata, uniqueBase, videoUrl, format);
 
   metadataPromise.then(fullMetadata => {
@@ -772,6 +868,11 @@ async function downloadYouTubeMedia(videoUrl, directory, format, downloadId, pla
 
   return new Promise((resolve, reject) => {
     const runner = ytDlp.exec(videoUrl, ytOptions);
+
+    if (controller) {
+      controller.runner = runner;
+      controller.finalFilePath = finalFilePath;
+    }
 
     const onError = error => {
       reject(error instanceof Error ? error : new Error(String(error)));
@@ -835,12 +936,20 @@ async function downloadYouTubeMedia(videoUrl, directory, format, downloadId, pla
           });
           resolve({ filePath: finalFilePath });
         } catch (error) {
-          reject(error);
+          if (controller && controller.cancelled) {
+            reject(createCancelledError('Shkarkimi u ndërpre nga përdoruesi.'));
+          } else {
+            reject(error);
+          }
         }
       } else {
-        const message = lastErrorLine || `youtube-dl exited with code ${code}`;
-        console.error(`[download:${downloadId}] ${message}`);
-        reject(new Error(message));
+        if (controller && controller.cancelled) {
+          reject(createCancelledError('Shkarkimi u ndërpre nga përdoruesi.'));
+        } else {
+          const message = lastErrorLine || `youtube-dl exited with code ${code}`;
+          console.error(`[download:${downloadId}] ${message}`);
+          reject(new Error(message));
+        }
       }
     });
   });
@@ -925,6 +1034,49 @@ function recordDownloadHistory(entry) {
   }
 }
 
+function cancelDownload(downloadId) {
+  if (!downloadId) {
+    return { ok: false, reason: 'Mungon ID e shkarkimit.' };
+  }
+
+  // Cancel queued download
+  const queuedIndex = downloadQueue.findIndex(job => job.id === downloadId);
+  if (queuedIndex !== -1) {
+    const [job] = downloadQueue.splice(queuedIndex, 1);
+    sendProgress({
+      id: job.id,
+      status: 'cancelled',
+      message: 'Shkarkimi u hoq nga radha.',
+      fileName: null,
+      format: job.format,
+      title: null,
+      thumbnail: null,
+      source: isYouTubeUrl(job.url) ? 'youtube' : 'direct',
+      url: job.url
+    });
+    clearDownloadController(downloadId);
+    return { ok: true, queuedOnly: true };
+  }
+
+  // Cancel active download
+  const controller = getDownloadController(downloadId);
+  if (controller) {
+    controller.cancelled = true;
+    if (controller.request && typeof controller.request.destroy === 'function') {
+      controller.request.destroy();
+    }
+    if (controller.fileStream && typeof controller.fileStream.destroy === 'function') {
+      controller.fileStream.destroy();
+    }
+    if (controller.runner && typeof controller.runner.kill === 'function') {
+      controller.runner.kill('SIGTERM');
+    }
+    return { ok: true, active: true };
+  }
+
+  return { ok: false, reason: 'Nuk u gjet asnjë shkarkim me këtë ID.' };
+}
+
 function isVersionNewer(latest, current) {
   const toParts = v =>
     String(v || '')
@@ -945,7 +1097,7 @@ function isVersionNewer(latest, current) {
   return false;
 }
 
-function buildYtDlpOptions(format, outputTemplate, { playlist = false } = {}) {
+function buildYtDlpOptions(format, outputTemplate, { playlist = false, quality = 'auto' } = {}) {
   const subtitleLanguages = settingsStore.get('subtitleLanguages') || ['sq', 'en'];
 
   const baseOptions = {
@@ -974,9 +1126,20 @@ function buildYtDlpOptions(format, outputTemplate, { playlist = false } = {}) {
     };
   }
 
+  let formatSelector = 'bv*+ba/b';
+  const sanitizedQuality = String(quality || 'auto').toLowerCase();
+
+  if (sanitizedQuality === '1080p') {
+    formatSelector = 'bestvideo[height<=1080]+bestaudio/best/best[height<=1080]';
+  } else if (sanitizedQuality === '720p') {
+    formatSelector = 'bestvideo[height<=720]+bestaudio/best/best[height<=720]';
+  } else if (sanitizedQuality === '480p') {
+    formatSelector = 'bestvideo[height<=480]+bestaudio/best/best[height<=480]';
+  }
+
   return {
     ...baseOptions,
-    format: 'bv*+ba/b',
+    format: formatSelector,
     mergeOutputFormat: 'mp4'
   };
 }
@@ -1087,3 +1250,9 @@ function parseYtDlpProgress(chunk, fileName, format, downloadId, preview) {
     });
   }
 }
+
+ipcMain.handle('cancel-download', async (_event, payload) => {
+  const downloadId = payload && payload.id;
+  const result = cancelDownload(downloadId);
+  return result;
+});
